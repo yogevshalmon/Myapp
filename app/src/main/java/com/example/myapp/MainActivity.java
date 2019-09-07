@@ -529,6 +529,7 @@ public class MainActivity extends AppCompatActivity implements  BlankFragment.On
             }
 
         }
+        t.clear();
         return t;
     }
 
