@@ -41,11 +41,15 @@ import com.google.android.gms.nearby.connection.PayloadTransferUpdate;
 import com.google.android.gms.nearby.connection.Strategy;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.Serializable;
+import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -62,7 +66,7 @@ public class MainActivity extends AppCompatActivity implements  BlankFragment.On
     private static final String SERVICE_ID = "com.example.myapp.AD-HOC"; //strategy used
     private static final String TAG = "MyActivity";
     private static String mEndPointId = null;
-    private static String userNickName;
+    private static String userNickName; //see notebook, unique need to make unique!!!!
 
     private ConnectionsClient mConnectionsClient; //ni
 
@@ -83,6 +87,7 @@ public class MainActivity extends AppCompatActivity implements  BlankFragment.On
 
     private FrameLayout fragmentContainer;
     private Button button;
+    private Button button2;
 
     private void startAdvertising() {
         AdvertisingOptions advertisingOptions =
@@ -201,7 +206,16 @@ public class MainActivity extends AppCompatActivity implements  BlankFragment.On
         button.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-               // sendMessage();
+               startAdvertising();
+            }
+        });
+
+        button2 = (Button)findViewById(R.id.button2);
+
+        button2.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startDiscovery();
             }
         });
 
@@ -267,14 +281,17 @@ public class MainActivity extends AppCompatActivity implements  BlankFragment.On
                 public void onConnectionResult(String endpointId, ConnectionResolution result) {
                     switch (result.getStatus().getStatusCode()) {
                         case ConnectionsStatusCodes.STATUS_OK:
-                            String s=mRequestConnections.get(endpointId);
+                            String s=mRequestConnections.get(endpointId); //get name form requestConnnections Map
 
                             EndPoint endPoint = new EndPoint(endpointId,s,endpointId,1);
                             connectedList.add(endPoint);
-                               if(mEndPointId!=null && s.compareTo(getUserNickname())>=0){ //only who initate the connection will initiate the exchange
-                                   getMEndPointId(endpointId,true);
-                               }
+                              // if(mEndPointId!=null && s.compareTo(getUserNickname())>=0){ //only who initate the connection will initiate the exchange
+                             //      getMEndPointId(endpointId,true); //temp for getMyendPointId
+                             //  }
+
                             connectedListUpdateView();
+
+                            updateRoutingTable(connectedList);// update the table in the routing algorithym
 
                             // We're connected! Can now start sending and receiving data.
                             logD("connection result status ok");
@@ -316,9 +333,30 @@ public class MainActivity extends AppCompatActivity implements  BlankFragment.On
                         JSONObject jsonObject = new JSONObject(s);
                         switch (jsonObject.get("messageType").toString()){
                             case("updateRoutingTable"):
+                                logD("updateRoutongTable type entered");
+                                logD(s);
+                                String jsonText = jsonObject.getString("connectedList");
+                                Type listType = new TypeToken<List<EndPoint>>() {}.getType();
+
+                                List<EndPoint> routingtable = new Gson().fromJson(jsonText , listType);
+
+
+                                for(int i = 0; i < routingtable.size(); i++){
+                                   if(!routingtable.get(i).endPointName.equals(getUserNickname())) {//if equals mean its our endpoint and we dont check..
+
+                                       if (getEndPointPos(connectedList, routingtable.get(i).endPointId) == -1) {//we didnt find the endpoint so we add this to our list
+                                           logD("found new endpoind by routing table");
+                                           routingtable.get(i).Dist = routingtable.get(i).Dist + 1; //update dist
+                                           connectedList.add(routingtable.get(i));
+                                           connectedListUpdateView();//update vissually the table
+                                       } else {// need to check if it shorter distance
+                                           logD("endpoind by routing table exist");
+                                       }
+                                   }
+                                }
 
                                 ;
-                            case("getMEndPointId"):
+                            /*case("getMEndPointId"):  //test for get myEndPointId service
                                 String mId = jsonObject.getString("endPointId");
                                 boolean ack = jsonObject.getBoolean("ack");
                                 if(mEndPointId!=null){
@@ -327,7 +365,7 @@ public class MainActivity extends AppCompatActivity implements  BlankFragment.On
                                 if(ack){
                                     getMEndPointId(endpointId,false);
                                 }
-                             ;
+                             ; */
                             case("message"):
                                 String mes = jsonObject.getString("message");
                                 Message m = new Message(mes,"");
@@ -369,7 +407,7 @@ public class MainActivity extends AppCompatActivity implements  BlankFragment.On
             obj.put("message" , message.message);
             byte [] b = obj.toString().getBytes();
             Payload bytesPayload = Payload.fromBytes(b);
-            mConnectionsClient.sendPayload(reciver,bytesPayload); //send to all possibale endpoints
+            mConnectionsClient.sendPayload(reciver,bytesPayload); //send to reciver
             logD("send message: " + message);
 
         }
@@ -454,13 +492,20 @@ public class MainActivity extends AppCompatActivity implements  BlankFragment.On
 
     public void updateRoutingTable(ArrayList<EndPoint> connectedList){
         JSONObject obj = new JSONObject();
+
         try{
             obj.put("messageType","updateRoutingTable");
-            obj.put("connectList" , connectedList);
+
+            String jsonText =  new Gson().toJson(connectedList);
+            logD("jsArrary:" + jsonText);
+            obj.put("connectedList" , jsonText);
             byte [] b = obj.toString().getBytes();
             ArrayList<String> sendList = getMultiCastEndPoints(connectedList);
-            Payload bytesPayload = Payload.fromBytes(b);
-            mConnectionsClient.sendPayload(sendList,bytesPayload); //send to all possibale endpoints
+            if(sendList.size()>0){
+                Payload bytesPayload = Payload.fromBytes(b);
+                mConnectionsClient.sendPayload(sendList,bytesPayload); //send to all possibale endpoints
+            }
+
 
 
         }
@@ -520,7 +565,7 @@ public class MainActivity extends AppCompatActivity implements  BlankFragment.On
     }
 
     public ArrayList<String> getMultiCastEndPoints(ArrayList<EndPoint> arr){
-        ArrayList<String> t=null;
+        ArrayList<String> t= new ArrayList<String>();
         int size=arr.size();
         logD("arr size:" + size);
         for(int i=0;i<size;i++){
